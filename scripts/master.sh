@@ -1,15 +1,14 @@
 #! /bin/bash
 
-MASTER_IP="10.0.0.10"
+MASTER_IP="192.168.56.10"
 NODENAME=$(hostname -s)
-POD_CIDR="192.168.0.0/16"
+POD_CIDR="10.244.0.0/16"
 
 sudo kubeadm config images pull
 
 echo "Preflight Check Passed: Downloaded All Required Images"
 
-
-sudo kubeadm init --apiserver-advertise-address=$MASTER_IP  --apiserver-cert-extra-sans=$MASTER_IP --pod-network-cidr=$POD_CIDR --node-name $NODENAME --ignore-preflight-errors Swap
+sudo kubeadm init --config /vagrant/scripts/kubeadm-config.yaml
 
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
@@ -34,7 +33,7 @@ kubeadm token create --print-join-command > /vagrant/configs/join.sh
 
 # Install Calico Network Plugin
 curl https://docs.projectcalico.org/manifests/calico.yaml -O
-
+sed -i -e "s?192.168.0.0/16?$POD_CIDR?g" calico.yaml
 kubectl apply -f calico.yaml
 
 # Install Metrics Server
@@ -43,6 +42,9 @@ kubectl patch deployment metrics-server -n kube-system --type 'json' -p '[{"op":
 
 # Install Kubernetes Dashboard
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.4.0/aio/deploy/recommended.yaml
+
+# Install OPA Gatekeeper
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper/release-3.7/deploy/gatekeeper.yaml
 
 # Create Dashboard User
 cat <<EOF | kubectl apply -f -

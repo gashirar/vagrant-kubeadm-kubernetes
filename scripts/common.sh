@@ -19,6 +19,12 @@ EOF
 cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
 net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
+vm.overcommit_memory = 1
+vm.panic_on_oom = 0
+kernel.panic = 10
+kernel.panic_on_oops = 1
+kernel.keys.root_maxkeys = 1000000
+kernel.keys.root_maxbytes = 25000000
 EOF
 sudo sysctl --system
 
@@ -41,31 +47,43 @@ EOF
 # Apply sysctl params without reboot
 sudo sysctl --system
 
-#Clean Install Docker Engine on Ubuntu
-sudo apt-get remove docker docker-engine docker.io containerd runc
-sudo apt-get update -y
-sudo apt-get install -y \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release
+# (Install Docker CE)
+## Set up the repository:
+### Install packages to allow apt to use a repository over HTTPS
+apt-get update && apt-get install -y \
+  apt-transport-https ca-certificates curl software-properties-common gnupg2
 
-#Add Docker’s official GPG key:
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+# Add Docker's official GPG key:
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key --keyring /etc/apt/trusted.gpg.d/docker.gpg add -
 
-#set up the stable repository
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Add the Docker apt repository:
+add-apt-repository \
+  "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) \
+  stable"
 
-#Install Docker Engine
-sudo apt-get update -y
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+## Install containerd
+sudo apt-get update && sudo apt-get install -y containerd.io
+
+
+#Install runsc
+(
+  set -e
+  ARCH=$(uname -m)
+  URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+  wget ${URL}/runsc ${URL}/runsc.sha512 \
+    ${URL}/containerd-shim-runsc-v1 ${URL}/containerd-shim-runsc-v1.sha512
+  sha512sum -c runsc.sha512 \
+    -c containerd-shim-runsc-v1.sha512
+  rm -f *.sha512
+  chmod a+rx runsc containerd-shim-runsc-v1
+  sudo mv runsc containerd-shim-runsc-v1 /usr/local/bin
+)
+
 
 #Configure containerd
 sudo mkdir -p /etc/containerd
-containerd config default | sudo tee /etc/containerd/config.toml
+cp /vagrant/scripts/config.toml /etc/containerd/config.toml
 
 #restart containerd
 sudo systemctl restart containerd
@@ -89,3 +107,12 @@ sudo apt-get install -y kubelet kubectl kubeadm
 
 sudo apt-mark hold kubelet kubeadm kubectl
 
+# Vagrantで作成されたVMのeth0は10.0.2.15であり、各Nodeが同一IPとなってしまうため、
+# KUBELET_EXTRA_ARGSにNodeごとのIPアドレス設定を加える
+IPADDR=$(ip a show eth1 | grep inet | grep -v inet6 | awk '{print $2'} | cut -f1 -d/)
+cat <<EOF | sudo tee /etc/default/kubelet
+KUBELET_EXTRA_ARGS=--node-ip=${IPADDR}
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet

@@ -1,5 +1,5 @@
-NUM_WORKER_NODES=2
-IP_NW="10.0.0."
+NUM_WORKER_NODES=1
+IP_NW="192.168.56."
 IP_START=10
 
 Vagrant.configure("2") do |config|
@@ -9,7 +9,7 @@ Vagrant.configure("2") do |config|
         echo "$IP_NW$((IP_START+1))  worker-node01" >> /etc/hosts
         echo "$IP_NW$((IP_START+2))  worker-node02" >> /etc/hosts
     SHELL
-    config.vm.box = "bento/ubuntu-21.10"
+    config.vm.box = "bento/ubuntu-20.04"
     config.vm.box_check_update = true
 
     config.vm.define "master" do |master|
